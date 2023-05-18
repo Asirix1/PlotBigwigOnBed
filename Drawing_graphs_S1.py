@@ -57,33 +57,30 @@ for chrom in tqdm.tqdm(bigWig_chroms_clear):
   intervals = b.intervals(chrom)
   for start,end,value in intervals:
     chrom_arrays[chrom][start:end] = value
+    
+#calculations
+coverage=[]
 
-def compute_average_coverage(row, dist, bigwigfile, radius=1): 
-        pos = row["mids"] + dist
+for chrom in tqdm.tqdm(bigWig_chroms_clear):
+ bed_chrom = bed.query("chrom == @chrom")
+ mids_array=np.array(bed_chrom ["mids"])
 
-        if pos > 0 and pos < bigWig_chroms_dict[row["chrom"]]:
+ mids_array=mids_array.reshape(len(mids_array),-1)
+ coordinates=mids_array+distances
+ assert np.all(coordinates) > 0
+ assert np.all(coordinates) < bigWig_chroms_dict[chrom]
+ chrom_coverage=[chrom_arrays[chrom][item] for item in coordinates]
+ assert np.array(chrom_coverage).size == coordinates.size
+ coverage.extend(chrom_coverage)
+ 
+coverage=np.array(coverage)
+coverage.reshape(-1,len(distances))
+coverage_mean=np.mean(coverage,axis=0)
 
-          coverage = sum(chrom_arrays[row["chrom"]][pos:pos+radius])
-
-          if coverage is not None and np.isfinite(coverage):
-            return coverage
-          else:
-            coverage=0
-            return coverage 
-        else: # what happens is this 'if' condition is not TRUE?
-          print(pos)
-          print(bigWig_chroms_dict[row["chrom"]])
-          raise Exception("wrong pos for row "+str(row) + " and distance "+str(dist) )
-
-bed = bed.query("chrom in @bigWig_chroms_clear")
-for dist in tqdm.tqdm(distances):
-  coverage = bed.apply(compute_average_coverage, dist=dist, bigwigfile = b, axis="columns")
-    # join 
-  coverages.append(coverage.values.mean())
-save_values=pd.DataFrame({'distances': distances, 'values': coverages})
+save_values=pd.DataFrame({'distances': distances, 'values': coverage_mean})
 save_values.to_csv('/storage2/asirix/S1/WG_on_ ATAC/values.txt', sep='\t')
 
-plt.plot(distances, coverages)
+plt.plot(distances, coverage_mean)
 
 # shuffle
 
@@ -128,39 +125,38 @@ def calc_random_control(bed=bed, bigWig_chroms_clear=bigWig_chroms_clear):
 
  return random_control
 
-
-
-coverages_many_cont=np.zeros(len(distances))
-coverages_cont_var=[]
+coverages_cont_aver=[]
 
 #shuffling several times
 for i in tqdm.tqdm(range(num_shuffle)): # why not for i in range(num_shuffle) ?
- coverages_cont_aver=[]
-
+ random_coverage=[]
  control=calc_random_control(bed=bed, bigWig_chroms_clear=bigWig_chroms_clear)
 
- for dist in distances:
-  coverage_cont = control.apply(compute_average_coverage, dist=dist, bigwigfile = b, axis="columns")
-  coverages_cont_aver.append(coverage_cont.mean())
+ for chrom in tqdm.tqdm(bigWig_chroms_clear):
+  control_chrom=control.query("chrom == @chrom")
+  mids_array=np.array(control_chrom["mids"],dtype=np.int32)
+  mids_array=mids_array.reshape(len(mids_array),-1)
+  coordinates=mids_array+distances
+  assert np.all(coordinates) > 0
+  assert np.all(coordinates) < bigWig_chroms_dict[chrom]
+  random_chrom_coverage=[chrom_arrays[chrom][item] for item in coordinates]
+  assert np.array(random_chrom_coverage).size == coordinates.size
+  random_coverage.extend(random_chrom_coverage)
  
+ random_coverage=np.array(random_coverage)
+ random_coverage.reshape(-1,len(distances))
+ random_coverage_mean=np.mean(random_coverage,axis=0)
+ coverages_cont_aver.append(random_coverage_mean)
+control_mean=np.average(coverages_cont_aver,axis=0)
+control_std=np.std(coverages_cont_aver,axis=0)
 
- coverages_cont_var.append(coverages_cont_aver) 
- coverages_many_cont=coverages_many_cont+coverages_cont_aver
-
-coverages_cont_var=np.reshape(coverages_cont_var, (num_shuffle,len(distances)))
-
-coverages_many_cont_var=np.var(coverages_cont_var, axis=0)
-coverages_many_cont=coverages_many_cont/num_shuffle
-
-random_values=pd.DataFrame({'distances': distances, 'mean': coverages_many_cont, 'var': coverages_many_cont_var})
+random_values=pd.DataFrame({'distances': distances, 'mean': control_mean, 'std': control_std})
 random_values.to_csv('/storage2/asirix/S1/WG_on_ ATAC/random_values.txt', sep='\t')
 
-coverages_3sigma_up=coverages_many_cont+(coverages_many_cont_var**0.5)*3
-coverages_3sigma_down=coverages_many_cont-(coverages_many_cont_var**0.5)*3
+plt.plot(distances, control_mean, color='r')
+plt.plot(distances, control_mean+3*control_std, '--', color='r')
+plt.plot(distances, control_mean-3*control_std,'--', color='r')
+plt.fill_between(distances,control_mean+3*control_std,control_mean-3*control_std,color='r',alpha=0.2)
 
-plt.plot(distances, coverages_many_cont, color='r')
-plt.plot(distances, coverages_3sigma_up, '--', color='r')
-plt.plot(distances, coverages_3sigma_down,'--', color='r')
-plt.fill_between(distances,coverages_3sigma_up,coverages_3sigma_down,color='r',alpha=0.2)
 plt.savefig('/storage2/asirix/S1/WG_on_ ATAC/WG_on_ATAC.png')
 print("--- %s seconds ---" % (time.time() - start_time))
