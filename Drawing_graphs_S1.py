@@ -5,16 +5,15 @@ import pyBigWig as bw
 import matplotlib.pyplot as plt 
 import random
 import tqdm 
+import pybedtools as pb
 
 start_time = time.time()
 
 # peaks from bed files
-bed = pd.read_csv("/storage2/asirix/S1/WG_on_ ATAC/ATAC_track.bed", sep="\t", header=None, usecols=[0,1,2] ,
+bed = pd.read_csv("/storage2/asirix/S1/Optimized_script/MNase20.6U_on_ATAC/ATAC_track.bed", sep="\t", header=None, usecols=[0,1,2] ,
                   names=["chrom","st","end"])
-
-# center of each peak
-assert np.all(bed.end - bed.st > 0)
-bed["mids"] = bed.st + (bed.end - bed.st) // 2
+blacklist= pd.read_csv('/storage2/asirix/S1/Optimized_script/MNase20.6U_on_DNase/hg38-blacklist.v2.bed',sep='\t',header=None, usecols=[0,1,2], 
+                       names=["chrom","st","end"])
 
 # set of distances
 distances = np.concatenate([
@@ -25,7 +24,7 @@ np.arange(1000,3000,20)
 num_shuffle = 100
 
 # compute coverage
-b = bw.open("/storage2/asirix/S1/WG_on_ ATAC/Offset1_K562WG.coverage.bw")
+b = bw.open("/storage2/asirix/S1/Optimized_script/MNase20.6U_on_DNase/Offset1_MNase20.6U.coverage.bw")
 
 # check consistency bigwig and bed-file
 
@@ -49,7 +48,7 @@ for chrm in bed_chroms_clear:
 
 coverages = []
 
-#creating_array_with_intervals_values_for_each_chrom
+#creating array with intervals values for each chrom
 chrom_arrays = {}
 for chrom in bigWig_chroms_clear:
   chrom_arrays[chrom] = np.zeros(shape=b.chroms()[chrom], dtype=np.float32)
@@ -57,7 +56,17 @@ for chrom in tqdm.tqdm(bigWig_chroms_clear):
   intervals = b.intervals(chrom)
   for start,end,value in intervals:
     chrom_arrays[chrom][start:end] = value
-    
+
+# center of each peak and deleting blacklisted regions
+
+assert np.all(bed.end - bed.st > 0)
+bed["mids"] = bed.st + (bed.end - bed.st) // 2
+bed=pb.BedTool.from_dataframe(bed)
+blacklist=pb.BedTool.from_dataframe(blacklist)
+bed=bed.intersect(blacklist, v=True)
+bed = bed.to_dataframe()
+bed.rename(columns={'start':'st','name': 'mids'}, inplace=True)
+
 #calculations
 coverage=[]
 
@@ -78,7 +87,7 @@ coverage.reshape(-1,len(distances))
 coverage_mean=np.mean(coverage,axis=0)
 
 save_values=pd.DataFrame({'distances': distances, 'values': coverage_mean})
-save_values.to_csv('/storage2/asirix/S1/WG_on_ ATAC/values.txt', sep='\t')
+save_values.to_csv('/storage2/asirix/S1/Optimized_script/MNase20.6U_on_ATAC/values.txt', sep='\t')
 
 plt.plot(distances, coverage_mean)
 
@@ -118,10 +127,6 @@ def calc_random_control(bed=bed, bigWig_chroms_clear=bigWig_chroms_clear):
     random_control = pd.concat([random_control, random_for_chrom], axis=0, ignore_index=True)
  random_control["mids"] = random_control.st + (random_control.end - random_control.st) // 2
 
-    # this should be better done once, outside the loop
-    # you don't whant to recompute the mids each time you add new chromsome
-    # just a small step toward fight with the global Earth warming =)
-    #random_control["mids"] = random_control.st + (random_control.end - random_control.st) // 2
 
  return random_control
 
@@ -131,8 +136,12 @@ coverages_cont_aver=[]
 for i in tqdm.tqdm(range(num_shuffle)): # why not for i in range(num_shuffle) ?
  random_coverage=[]
  control=calc_random_control(bed=bed, bigWig_chroms_clear=bigWig_chroms_clear)
+ control=pb.BedTool.from_dataframe(control)
+ control=control.intersect(blacklist, v=True)
+ control = control.to_dataframe()
+ control.rename(columns={'start':'st','name': 'mids'}, inplace=True)
 
- for chrom in tqdm.tqdm(bigWig_chroms_clear):
+ for chrom in bigWig_chroms_clear:
   control_chrom=control.query("chrom == @chrom")
   mids_array=np.array(control_chrom["mids"],dtype=np.int32)
   mids_array=mids_array.reshape(len(mids_array),-1)
@@ -151,12 +160,14 @@ control_mean=np.average(coverages_cont_aver,axis=0)
 control_std=np.std(coverages_cont_aver,axis=0)
 
 random_values=pd.DataFrame({'distances': distances, 'mean': control_mean, 'std': control_std})
-random_values.to_csv('/storage2/asirix/S1/WG_on_ ATAC/random_values.txt', sep='\t')
+random_values.to_csv('/storage2/asirix/S1/Optimized_script/MNase20.6U_on_ATAC/random_values.txt', sep='\t')
 
 plt.plot(distances, control_mean, color='r')
 plt.plot(distances, control_mean+3*control_std, '--', color='r')
 plt.plot(distances, control_mean-3*control_std,'--', color='r')
 plt.fill_between(distances,control_mean+3*control_std,control_mean-3*control_std,color='r',alpha=0.2)
-
-plt.savefig('/storage2/asirix/S1/WG_on_ ATAC/WG_on_ATAC.png')
+plt.xlabel("Distance to centers of Tn5 peaks")
+plt.ylabel("Average MNase20.6U signal")
+plt.axvline(linestyle ='--',color='black')
+plt.savefig('/storage2/asirix/S1/Optimized_script/MNase20.6U_on_ATAC/MNase20.6U_on_ATAC.png')
 print("--- %s seconds ---" % (time.time() - start_time))
