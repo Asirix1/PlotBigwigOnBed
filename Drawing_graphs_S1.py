@@ -5,26 +5,27 @@ import pyBigWig as bw
 import matplotlib.pyplot as plt 
 import random
 import tqdm 
+import os
 import pybedtools as pb
 
 start_time = time.time()
 
+i=os.environ['i'] #bed name 
+g=os.environ['g'] #bigwig name
+
 # peaks from bed files
-bed = pd.read_csv("/storage2/asirix/S1/Optimized_script/MNase20.6U_on_ATAC/ATAC_track.bed", sep="\t", header=None, usecols=[0,1,2] ,
+bed = pd.read_csv('/mnt/storage/home/aapopov/S1_final_step_5/S1_final/tracks/'+i, sep="\t", header=None, usecols=[0,1,2],
                   names=["chrom","st","end"])
-blacklist= pd.read_csv('/storage2/asirix/S1/Optimized_script/MNase20.6U_on_DNase/hg38-blacklist.v2.bed',sep='\t',header=None, usecols=[0,1,2], 
+
+blacklist= pd.read_csv('/mnt/storage/home/aapopov/S1_final_step_5/S1_final/hg38-blacklist.v2.bed',sep='\t',header=None, usecols=[0,1,2], 
                        names=["chrom","st","end"])
 
 # set of distances
-distances = np.concatenate([
-np.arange(-3000,-1000,20), 
-np.arange(-1000,1000),
-np.arange(1000,3000,20)
-])
+distances = np.arange(-3000,3000,2)
 num_shuffle = 100
 
 # compute coverage
-b = bw.open("/storage2/asirix/S1/Optimized_script/MNase20.6U_on_DNase/Offset1_MNase20.6U.coverage.bw")
+b = bw.open('/mnt/storage/home/aapopov/S1_final_step_5/S1_final/bigwigs/' + g)
 
 # check consistency bigwig and bed-file
 
@@ -59,7 +60,7 @@ for chrom in tqdm.tqdm(bigWig_chroms_clear):
 
 # center of each peak and deleting blacklisted regions
 
-assert np.all(bed.end - bed.st > 0)
+assert np.all(bed.end - bed.st >= 0)
 bed["mids"] = bed.st + (bed.end - bed.st) // 2
 bed=pb.BedTool.from_dataframe(bed)
 blacklist=pb.BedTool.from_dataframe(blacklist)
@@ -87,9 +88,9 @@ coverage.reshape(-1,len(distances))
 coverage_mean=np.mean(coverage,axis=0)
 
 save_values=pd.DataFrame({'distances': distances, 'values': coverage_mean})
-save_values.to_csv('/storage2/asirix/S1/Optimized_script/MNase20.6U_on_ATAC/values.txt', sep='\t')
+save_values.to_csv('/mnt/storage/home/aapopov/S1_final_step_5/S1_final/values/'+g+'_on_'+i+'.txt', sep='\t')
 
-plt.plot(distances, coverage_mean)
+plt.plot(distances, coverage_mean, lw=0.5)
 
 # shuffle
 
@@ -101,23 +102,19 @@ def calc_random_control(bed=bed, bigWig_chroms_clear=bigWig_chroms_clear):
     ends = bed.query('chrom==@chr')["end"].values
      
     region_lengths = ends - starts
-    inter_region_lengths = starts[1:] - ends[:-1] # well done!
-    assert inter_region_lengths.min() > 0 # good point!
+    inter_region_lengths = starts[1:] - ends[:-1] 
+    assert inter_region_lengths.min() > 0 
 
     random.shuffle(region_lengths)
     random.shuffle(inter_region_lengths)
     
     new_starts = np.insert(np.cumsum(region_lengths[:-1] + inter_region_lengths)+starts.min(), 0, starts.min())
 
-    # new_starts.sort() # actually, should it be sorted alread?
-    # i suggest to comment this line and see whether it will
-    # pass through the assert below
 
     assert (new_starts[1:] - new_starts[:-1]).min() >= 0
     
     new_ends = new_starts +  region_lengths
 
-    ###
     chroms = [chr] * len(starts)
 
     assert len(set(chroms))==1
@@ -133,7 +130,7 @@ def calc_random_control(bed=bed, bigWig_chroms_clear=bigWig_chroms_clear):
 coverages_cont_aver=[]
 
 #shuffling several times
-for i in tqdm.tqdm(range(num_shuffle)): # why not for i in range(num_shuffle) ?
+for t in tqdm.tqdm(range(num_shuffle)): 
  random_coverage=[]
  control=calc_random_control(bed=bed, bigWig_chroms_clear=bigWig_chroms_clear)
  control=pb.BedTool.from_dataframe(control)
@@ -160,14 +157,16 @@ control_mean=np.average(coverages_cont_aver,axis=0)
 control_std=np.std(coverages_cont_aver,axis=0)
 
 random_values=pd.DataFrame({'distances': distances, 'mean': control_mean, 'std': control_std})
-random_values.to_csv('/storage2/asirix/S1/Optimized_script/MNase20.6U_on_ATAC/random_values.txt', sep='\t')
+random_values.to_csv('/mnt/storage/home/aapopov/S1_final_step_5/S1_final/random_values/'+g+'_on_'+i+'.txt', sep='\t')
 
-plt.plot(distances, control_mean, color='r')
-plt.plot(distances, control_mean+3*control_std, '--', color='r')
-plt.plot(distances, control_mean-3*control_std,'--', color='r')
+plt.plot(distances, control_mean, color='r',lw=0.5)
+plt.plot(distances, control_mean+3*control_std, '--', color='r',lw=0.5)
+plt.plot(distances, control_mean-3*control_std,'--', color='r',lw=0.5)
 plt.fill_between(distances,control_mean+3*control_std,control_mean-3*control_std,color='r',alpha=0.2)
-plt.xlabel("Distance to centers of Tn5 peaks")
-plt.ylabel("Average MNase20.6U signal")
+plt.xlabel("Distance to center (bp)")
+plt.ylabel("Average signal")
 plt.axvline(linestyle ='--',color='black')
-plt.savefig('/storage2/asirix/S1/Optimized_script/MNase20.6U_on_ATAC/MNase20.6U_on_ATAC.png')
+for pos in ['right', 'top', 'bottom', 'left']:
+    plt.gca().spines[pos].set_visible(False)
+plt.savefig('/mnt/storage/home/aapopov/S1_final_step_5/S1_final/figures/'+g+'_on_'+i+'.png')
 print("--- %s seconds ---" % (time.time() - start_time))
